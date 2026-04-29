@@ -1,58 +1,145 @@
 # docker-compose.coolify.yml
 #
-# Template para Coolify. Una instancia = un agente (un Resource en Coolify).
-# Para N agentes, crea N Resources distintos, todos apuntando a este compose
-# pero con AGENT_ID, TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID propios.
+# 4 services en un solo Resource de Coolify, uno por participante del taller.
+# Coolify auto-detecta los ${VAR_AGENT0N} y los muestra como env vars vacios
+# en la UI; vos los rellenas con los valores reales de cada participante.
 #
-# IMPORTANTE — disenio:
-#   * Coolify aisla volumes y containers por Resource automaticamente. NO uses
-#     interpolacion `${AGENT_ID}` en nombres de volume / container_name —
-#     Coolify lo rechaza durante validacion ("forbidden character").
-#   * Coolify NO interpola en YAML keys (solo en valores). Por eso pasamos
-#     TELEGRAM_BOT_TOKEN con nombre fijo y el entrypoint.sh lo re-exporta
-#     como TELEGRAM_BOT_TOKEN_<UPPER(AGENT_ID)> antes del compile.
+# Convenciones:
+#   - Globales (sin sufijo): viven en Coolify Project env, compartidas.
+#   - Per-agent (con sufijo _AGENT0N): viven en el Resource env, una entrada
+#     por participante. Los containers reciben los valores en el nombre
+#     standard (sin sufijo) para que SDKs y skills no necesiten saber que
+#     son "del agente N".
+#   - El entrypoint renombra TELEGRAM_BOT_TOKEN -> TELEGRAM_BOT_TOKEN_AGENT0N
+#     dentro del container (lo necesita compile.py para expandir el YAML).
+#
+# Volumes y networks: Coolify aisla todo este compose stack del resto de
+# tu Coolify; los volumes `agent0N_*` solo ven a su propio service.
 
 services:
-  agent:
+  agent01:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
-      # Identidad del agente (REQUERIDO en Resource env vars).
-      AGENT_ID: ${AGENT_ID}
+      AGENT_ID: agent01
       FLEET_REF: ${FLEET_REF:-main}
       FLEET_REPO_URL: ${FLEET_REPO_URL:-https://github.com/Nikoxx99/openclaw-fleet-config.git}
-
-      # Forzar bind LAN para que Coolify enrute el gateway desde el host.
       OPENCLAW_GATEWAY_BIND: lan
-
-      # Per-agent (Resource env vars en Coolify): cada participante setea las suyas.
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      GEMINI_API_KEY: ${GEMINI_API_KEY}
-
-      # Globales por ahora (Project env vars). Si querés override por agente,
-      # setear la misma var en el Resource — Coolify Resource > Project.
+      # per-agent (Resource env, sufijadas)
+      OPENAI_API_KEY: ${OPENAI_API_KEY_AGENT01}
+      GEMINI_API_KEY: ${GEMINI_API_KEY_AGENT01}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_AGENT01}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID_AGENT01}
+      # globales (Project env)
       MINIMAX_API_KEY: ${MINIMAX_API_KEY}
       FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
       ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
       R2_BUCKET: ${R2_BUCKET}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
-
-      # Per-agent (resource-level env vars en Coolify). Nombres FIJOS aqui;
-      # el entrypoint los re-exporta como ${TELEGRAM_BOT_TOKEN_AGENT01} etc.
-      # antes de invocar compile.py.
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-
     volumes:
-      - openclaw_data:/home/node/.openclaw/workspace
-      - openclaw_logs:/var/log/agente
-
+      - agent01_data:/home/node/.openclaw/workspace
+      - agent01_logs:/var/log/agente
     ports:
-      - "${HOST_PORT:-0}:18789"
+      - "${PORT_AGENT01:-0}:18789"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/fleet-healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
+  agent02:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      AGENT_ID: agent02
+      FLEET_REF: ${FLEET_REF:-main}
+      FLEET_REPO_URL: ${FLEET_REPO_URL:-https://github.com/Nikoxx99/openclaw-fleet-config.git}
+      OPENCLAW_GATEWAY_BIND: lan
+      OPENAI_API_KEY: ${OPENAI_API_KEY_AGENT02}
+      GEMINI_API_KEY: ${GEMINI_API_KEY_AGENT02}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_AGENT02}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID_AGENT02}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      R2_BUCKET: ${R2_BUCKET}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+    volumes:
+      - agent02_data:/home/node/.openclaw/workspace
+      - agent02_logs:/var/log/agente
+    ports:
+      - "${PORT_AGENT02:-0}:18789"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/fleet-healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  agent03:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      AGENT_ID: agent03
+      FLEET_REF: ${FLEET_REF:-main}
+      FLEET_REPO_URL: ${FLEET_REPO_URL:-https://github.com/Nikoxx99/openclaw-fleet-config.git}
+      OPENCLAW_GATEWAY_BIND: lan
+      OPENAI_API_KEY: ${OPENAI_API_KEY_AGENT03}
+      GEMINI_API_KEY: ${GEMINI_API_KEY_AGENT03}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_AGENT03}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID_AGENT03}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      R2_BUCKET: ${R2_BUCKET}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+    volumes:
+      - agent03_data:/home/node/.openclaw/workspace
+      - agent03_logs:/var/log/agente
+    ports:
+      - "${PORT_AGENT03:-0}:18789"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/fleet-healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  agent04:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      AGENT_ID: agent04
+      FLEET_REF: ${FLEET_REF:-main}
+      FLEET_REPO_URL: ${FLEET_REPO_URL:-https://github.com/Nikoxx99/openclaw-fleet-config.git}
+      OPENCLAW_GATEWAY_BIND: lan
+      OPENAI_API_KEY: ${OPENAI_API_KEY_AGENT04}
+      GEMINI_API_KEY: ${GEMINI_API_KEY_AGENT04}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN_AGENT04}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID_AGENT04}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
+      R2_BUCKET: ${R2_BUCKET}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+    volumes:
+      - agent04_data:/home/node/.openclaw/workspace
+      - agent04_logs:/var/log/agente
+    ports:
+      - "${PORT_AGENT04:-0}:18789"
     healthcheck:
       test: ["CMD", "/usr/local/bin/fleet-healthcheck.sh"]
       interval: 30s
@@ -61,5 +148,11 @@ services:
       start_period: 30s
 
 volumes:
-  openclaw_data:
-  openclaw_logs:
+  agent01_data:
+  agent01_logs:
+  agent02_data:
+  agent02_logs:
+  agent03_data:
+  agent03_logs:
+  agent04_data:
+  agent04_logs:

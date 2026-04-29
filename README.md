@@ -41,28 +41,63 @@ Repositorio publico de configuracion declarativa para una flota de agentes
     └── crash-recovery.ts
 ```
 
-## Crear un agente nuevo
+## Modelo de despliegue
 
-```bash
-cp agents/_example.yaml agents/alice.yaml
-$EDITOR agents/alice.yaml          # rellenar TODO
-git add agents/alice.yaml && git commit -m "fleet: add alice"
-git push
+El compose incluye **4 services pre-declarados** (`agent01`..`agent04`),
+pensados para un taller con 4 participantes. Coolify los deploya **en un
+solo Resource** y muestra cada uno como un service separado en la UI.
+
+### Crear el Resource (1 sola vez)
+
+1. Coolify → **+ New Application** → **Public Repository**.
+2. URL: `https://github.com/Nikoxx99/openclaw-fleet-config`. Branch: `main`.
+3. **Build Pack: Docker Compose**.
+4. Compose file location: `/docker-compose.coolify.yml`.
+5. Save → Coolify auto-detecta los `${VAR_AGENT0N}` y los muestra vacios.
+
+### Setear env vars
+
+**Globales** (Project env, una sola vez):
+
+```
+MINIMAX_API_KEY=...
+FIRECRAWL_API_KEY=...
+ELEVENLABS_API_KEY=...
+R2_BUCKET=...
+R2_ACCESS_KEY_ID=...
+R2_SECRET_ACCESS_KEY=...
 ```
 
-En Coolify:
-1. **Add Resource → Docker Compose**, apuntando a este repo + `docker-compose.coolify.yml`.
-   Coolify buildea la imagen desde el `Dockerfile` del repo (no necesitas GHCR propio
-   — el FROM extiende `ghcr.io/openclaw/openclaw:latest` que ya existe).
-2. Env vars del recurso (per-agent):
-   - `AGENT_ID=alice`
-   - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-   (El upper-case se computa solo en `entrypoint.sh`; no setees `AGENT_ID_UPPER`.)
-3. Env vars compartidas (proyecto): `OPENAI_API_KEY`, `GEMINI_API_KEY`,
-   `FIRECRAWL_API_KEY`, `MINIMAX_API_KEY`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`,
-   `R2_SECRET_ACCESS_KEY`.
-4. Deploy. El `entrypoint.sh` clona el repo, compila la config y arranca el
-   gateway en puerto **18789** (`/healthz` para healthcheck).
+**Per-agent** (Resource env, 4 sets, sufijo `_AGENT01..04`):
+
+```
+OPENAI_API_KEY_AGENT01=<la del participante 1>
+GEMINI_API_KEY_AGENT01=<idem>
+TELEGRAM_BOT_TOKEN_AGENT01=<bot del participante 1>
+TELEGRAM_CHAT_ID_AGENT01=<chat del participante 1>
+
+OPENAI_API_KEY_AGENT02=<la del participante 2>
+... (idem para 02, 03, 04)
+```
+
+6. Deploy. Coolify buildea **una sola vez** (mismo Dockerfile para los 4) y
+   arranca los 4 containers. Cada uno corre el `entrypoint.sh` con su
+   `AGENT_ID` propio (hardcoded en el compose), clona el repo, compila su
+   config y arranca el gateway de OpenClaw en puerto 18789 interno.
+
+### Asignar a un participante
+
+Cuando le asignes un slot a alguien:
+
+```bash
+$EDITOR agents/agent01.yaml
+# - identity.name → nombre del participante
+# - identity.owner → email del participante
+# - judgment_rules → memoria/personalidad inicial si quieres custom
+git commit -am "fleet: assign agent01 to <participant>" && git push
+```
+
+Coolify recibe el webhook y redeploya solo el service afectado en ~30s.
 
 ## Pipeline de cambios
 
