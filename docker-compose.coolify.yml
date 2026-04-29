@@ -85,6 +85,16 @@ services:
       # 18789 NO se expone — solo accesible internamente via nginx.
       - "${PORT_AGENT01:-0}:8080"
 
+    extra_hosts:
+      # nginx del base genera un `location /browser/ { proxy_pass http://browser:3000/ }`
+      # apuntando a un sidecar opcional (kasmweb/chrome) que NO declaramos. nginx
+      # resuelve upstreams estaticos al startup; sin entrada DNS, nginx -t falla
+      # con "host not found in upstream 'browser'" y el container hace restart loop.
+      # Stub a 127.0.0.1: nginx arranca, /browser/ responde 502 si alguien lo pega
+      # (esperable sin sidecar real). Si llegas a montar el browser sidecar real,
+      # quita esta linea y agrega un service `browser` al compose.
+      - "browser:127.0.0.1"
+
     healthcheck:
       # /healthz lo expone nginx del base sin pasar por basic auth, asi que
       # Coolify (y cualquier load balancer externo) puede chequearlo sin token.
