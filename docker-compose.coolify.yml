@@ -27,11 +27,15 @@ services:
       # Forzar bind LAN para que Coolify enrute el gateway desde el host.
       OPENCLAW_GATEWAY_BIND: lan
 
-      # Compartidos (project-level env vars en Coolify).
+      # Per-agent (Resource env vars en Coolify): cada participante setea las suyas.
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
-      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
+
+      # Globales por ahora (Project env vars). Si querés override por agente,
+      # setear la misma var en el Resource — Coolify Resource > Project.
       MINIMAX_API_KEY: ${MINIMAX_API_KEY}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
       R2_BUCKET: ${R2_BUCKET}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}

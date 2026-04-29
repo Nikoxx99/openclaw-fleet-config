@@ -191,6 +191,21 @@ def main() -> int:
         )
         return 3
 
+    # Warn (don't fail) on missing per-agent secrets. The agent can still
+    # boot — providers using those keys will fail at runtime with their own
+    # error path, which is more informative than blocking compilation.
+    secrets_ref = merged.get("secrets_ref", {})
+    if isinstance(secrets_ref, dict):
+        per_agent_keys = secrets_ref.get("per_agent", []) or []
+        missing_per_agent = [k for k in per_agent_keys if not os.environ.get(k)]
+        if missing_per_agent:
+            sys.stderr.write(
+                "WARNING: per-agent secrets not set in environment "
+                f"(agent={merged.get('id')}): "
+                + ", ".join(missing_per_agent)
+                + "\n"
+            )
+
     args.out_dir.mkdir(parents=True, exist_ok=True)
     (args.out_dir / "openclaw.json").write_text(
         json.dumps(to_openclaw_json(merged), indent=2, ensure_ascii=False), encoding="utf-8"

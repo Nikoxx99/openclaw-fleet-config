@@ -75,15 +75,32 @@ hot-reload sin downtime via SIGHUP — pendiente de implementar en el harness.
 
 ## Secrets
 
-| Variable | Scope | Donde |
-|---|---|---|
-| `OPENAI_API_KEY` | proyecto | Coolify project env |
-| `GEMINI_API_KEY` | proyecto | Coolify project env |
-| `FIRECRAWL_API_KEY` | proyecto | Coolify project env |
-| `MINIMAX_API_KEY` | proyecto | Coolify project env |
-| `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | proyecto | Coolify project env |
-| `TELEGRAM_BOT_TOKEN` | per-agent | Coolify resource env (entrypoint lo renombra a `TELEGRAM_BOT_TOKEN_<UPPER(AGENT_ID)>`) |
-| `TELEGRAM_CHAT_ID` | per-agent | Coolify resource env (idem) |
+Patron: **default global con override per-agent**. Coolify implementa la
+herencia nativa — Resource env > Project env. La fuente de verdad real
+es la UI de Coolify; este repo solo documenta la convencion en
+`profiles/base.yaml -> secrets_ref` y warnea si una key per-agent
+falta al compilar.
+
+| Variable | Scope default | Donde la seteas | Override per-agent? |
+|---|---|---|---|
+| `OPENAI_API_KEY` | **per-agent** | Coolify Resource env | siempre |
+| `GEMINI_API_KEY` | **per-agent** | Coolify Resource env | siempre |
+| `MINIMAX_API_KEY` | global | Coolify Project env | si — set en Resource |
+| `FIRECRAWL_API_KEY` | global | Coolify Project env | si — set en Resource |
+| `ELEVENLABS_API_KEY` | global | Coolify Project env | si — set en Resource |
+| `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | global | Coolify Project env | si — set en Resource |
+| `TELEGRAM_BOT_TOKEN` | per-agent | Coolify Resource env | siempre (entrypoint lo renombra a `TELEGRAM_BOT_TOKEN_<UPPER(AGENT_ID)>`) |
+| `TELEGRAM_CHAT_ID` | per-agent | Coolify Resource env | siempre (idem) |
+
+**Mover una key entre scopes** (ej. cuando Minimax pase a per-agent
+porque cada participante usa su cuenta) son 30 segundos:
+
+1. Borrar la var del Project env en Coolify.
+2. Setear la var en cada Resource individualmente.
+3. (Opcional) actualizar `secrets_ref` en `profiles/base.yaml` para
+   que la documentacion / warning de compile.py refleje el cambio.
+
+Sin rebuild, sin redeploy del image, sin tocar codigo.
 
 **Nunca** commitees valores reales. Solo `${VAR_NAME}` en los YAML.
 

@@ -153,12 +153,30 @@ hooks:
       enabled: true
 
 # Nombres de secrets en Coolify (NO valores).
-# Cada agente añade su TELEGRAM_BOT_TOKEN_<ID> propio.
+#
+# Convencion de scope:
+#   - per_agent: cada Resource debe setearlas. Sin valor → el agente no
+#     puede usar ese provider. compile.py warnea si faltan.
+#   - global:    setearlas a nivel Project (compartidas). Override por
+#     Resource es legitimo: si un agente quiere su propio MINIMAX_API_KEY,
+#     lo setea en su Resource y Coolify la promueve sobre la del Project.
+#
+# Mover una key entre scopes (ej. Minimax pasa a per-agente) es solo
+# moverla en la UI de Coolify; este YAML actualiza la documentacion pero
+# no requiere cambio de codigo ni rebuild.
 secrets_ref:
-  - OPENAI_API_KEY
-  - GEMINI_API_KEY
-  - FIRECRAWL_API_KEY
-  - MINIMAX_API_KEY
+  per_agent:
+    - OPENAI_API_KEY
+    - GEMINI_API_KEY
+    # TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID son tambien per_agent pero el
+    # entrypoint las renombra a TELEGRAM_*_<UPPER(AGENT_ID)>; ver compose.
+  global:
+    - MINIMAX_API_KEY
+    - FIRECRAWL_API_KEY
+    - ELEVENLABS_API_KEY
+    - R2_BUCKET
+    - R2_ACCESS_KEY_ID
+    - R2_SECRET_ACCESS_KEY
 
 deployment:
   resources:
