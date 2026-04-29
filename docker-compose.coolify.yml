@@ -21,9 +21,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    command: ["agent01"]
     restart: unless-stopped
     environment:
-      AGENT_ID: agent01
       FLEET_REF: ${FLEET_REF:-main}
       FLEET_REPO_URL: ${FLEET_REPO_URL:-https://github.com/Nikoxx99/openclaw-fleet-config.git}
       OPENCLAW_GATEWAY_BIND: lan
@@ -55,9 +55,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    command: ["agent02"]
     restart: unless-stopped
     environment:
-      AGENT_ID: agent02
       FLEET_REF: ${FLEET_REF:-main}
       FLEET_REPO_URL: ${FLEET_REPO_URL:-https://github.com/Nikoxx99/openclaw-fleet-config.git}
       OPENCLAW_GATEWAY_BIND: lan
@@ -87,9 +87,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    command: ["agent03"]
     restart: unless-stopped
     environment:
-      AGENT_ID: agent03
       FLEET_REF: ${FLEET_REF:-main}
       FLEET_REPO_URL: ${FLEET_REPO_URL:-https://github.com/Nikoxx99/openclaw-fleet-config.git}
       OPENCLAW_GATEWAY_BIND: lan
@@ -119,9 +119,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    command: ["agent04"]
     restart: unless-stopped
     environment:
-      AGENT_ID: agent04
       FLEET_REF: ${FLEET_REF:-main}
       FLEET_REPO_URL: ${FLEET_REPO_URL:-https://github.com/Nikoxx99/openclaw-fleet-config.git}
       OPENCLAW_GATEWAY_BIND: lan

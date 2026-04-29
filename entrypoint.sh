@@ -10,7 +10,14 @@
 
 set -euo pipefail
 
-: "${AGENT_ID:?AGENT_ID is required (e.g. 'agent01')}"
+# AGENT_ID puede venir de:
+#   - el primer argumento del comando (compose: command: ["agent01"]) — preferido
+#   - o de la env var AGENT_ID (deploy manual / docker run -e AGENT_ID=...)
+# El primer arg gana porque en Coolify multi-service las env vars con el mismo
+# nombre se deduplican entre services (issue coollabsio/coolify#7655) y todos
+# los containers acabarian con el mismo AGENT_ID.
+AGENT_ID="${1:-${AGENT_ID:-}}"
+: "${AGENT_ID:?AGENT_ID is required (pass as first arg in compose: command: [\"agent01\"])}"
 : "${FLEET_REF:=main}"
 : "${FLEET_REPO_URL:=https://github.com/Nikoxx99/openclaw-fleet-config.git}"
 : "${FLEET_DIR:=/opt/fleet}"
