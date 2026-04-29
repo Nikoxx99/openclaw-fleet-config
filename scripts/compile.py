@@ -130,11 +130,80 @@ def build_provider_outputs(
     return plugins_entries, auth_profiles, models_providers
 
 
+def _model_block(model_in: dict[str, Any]) -> dict[str, Any]:
+    """Schema OpenClaw espera {primary: string, fallback?: string}.
+    Drops `null`, drops keys con valor falsy."""
+    out: dict[str, Any] = {}
+    primary = model_in.get("primary") if isinstance(model_in, dict) else None
+    if primary:
+        out["primary"] = primary
+    fallback = model_in.get("fallback") if isinstance(model_in, dict) else None
+    if fallback:
+        out["fallback"] = fallback
+    return out
+
+
+def _image_block(img_in: dict[str, Any]) -> dict[str, Any]:
+    """Schema OpenClaw espera {primary: string, fallbacks: string[]}.
+    Skips campos custom como spanish_text_in_images (esos viven en
+    fleet-policies.json para que las skills privadas los lean)."""
+    out: dict[str, Any] = {}
+    primary = img_in.get("primary") if isinstance(img_in, dict) else None
+    if primary:
+        out["primary"] = primary
+    fallbacks = img_in.get("fallbacks") if isinstance(img_in, dict) else None
+    if fallbacks:
+        out["fallbacks"] = list(fallbacks)
+    return out
+
+
+def _telegram_block(tg_in: dict[str, Any]) -> dict[str, Any]:
+    """Schema OpenClaw: {enabled, botToken, dmPolicy?, allowFrom?, groups?}.
+    Convierte snake_case YAML → camelCase JSON. `chat_id` NO existe en el
+    schema — vive en fleet-policies.json para uso de skills privadas."""
+    if not isinstance(tg_in, dict) or not tg_in:
+        return {}
+    out: dict[str, Any] = {}
+    if "enabled" in tg_in:
+        out["enabled"] = bool(tg_in["enabled"])
+    if tg_in.get("bot_token"):
+        out["botToken"] = tg_in["bot_token"]
+    if tg_in.get("dmPolicy"):
+        out["dmPolicy"] = tg_in["dmPolicy"]
+    if tg_in.get("allowFrom"):
+        out["allowFrom"] = list(tg_in["allowFrom"])
+    if tg_in.get("groups"):
+        out["groups"] = tg_in["groups"]
+    return out
+
+
+def _hooks_internal_block(hooks_in: dict[str, Any]) -> dict[str, Any]:
+    """Schema OpenClaw: hooks.internal = {enabled: bool, entries: {...}}.
+    Nuestro YAML tiene `hooks.internal.<name>.enabled` pero debe ir
+    bajo `entries.<name>.enabled`."""
+    internal_in = (hooks_in or {}).get("internal", {}) or {}
+    enabled = internal_in.get("enabled", True)
+    entries: dict[str, Any] = {}
+    for key, val in internal_in.items():
+        if key == "enabled":
+            continue
+        if isinstance(val, dict):
+            entries[key] = val
+    out: dict[str, Any] = {"enabled": bool(enabled)}
+    if entries:
+        out["entries"] = entries
+    return {"internal": out}
+
+
 def to_openclaw_json(
     merged: dict[str, Any], env: dict[str, str] | None = None
 ) -> dict[str, Any]:
     """Mapea el schema YAML al shape que el harness OpenClaw espera.
-    El JSON resultante imita la estructura de un openclaw.json valido.
+
+    Solo emite campos que el schema de OpenClaw acepta. Campos custom
+    nuestros (chat_id, spanish_text_in_images, chunk_max_chars, etc.)
+    viven en fleet-policies.json para que las skills/hooks privados los
+    lean sin que OpenClaw los rechace.
     """
     if env is None:
         env = dict(os.environ)
@@ -155,12 +224,14 @@ def to_openclaw_json(
         "agents": {
             "defaults": {
                 "workspace": rt.get("workspace", "/home/node/.openclaw/workspace"),
-                "model": rt.get("model", {}),
-                "imageModel": rt.get("image_input", {}),
-                "imageGenerationModel": rt.get("image_generation", {}),
+                "model": _model_block(rt.get("model", {})),
+                "imageModel": _image_block(rt.get("image_input", {})),
+                "imageGenerationModel": _image_block(rt.get("image_generation", {})),
             }
         },
-        "channels": merged.get("channels", {}),
+        "channels": {
+            "telegram": _telegram_block(merged.get("channels", {}).get("telegram", {})),
+        },
         "tools": merged.get("tools", {}),
         "session": {
             "dmScope": merged.get("session", {}).get("dm_scope", "per-channel-peer"),
@@ -168,7 +239,7 @@ def to_openclaw_json(
         "skills": {
             "install": {"nodeManager": "npm"},
         },
-        "hooks": merged.get("hooks", {"internal": {"enabled": True}}),
+        "hooks": _hooks_internal_block(merged.get("hooks", {})),
     }
 
     if plugins_entries:
@@ -190,7 +261,7 @@ def to_openclaw_json(
             provider_block["apiKey"] = tts_api_key
         out["messages"] = {
             "tts": {
-                "enabled": tts.get("enabled", False),
+                "enabled": bool(tts.get("enabled", False)),
                 "mode": tts.get("mode", "final"),
                 "provider": tts_provider_name,
                 "providers": {tts_provider_name: provider_block},
@@ -200,7 +271,14 @@ def to_openclaw_json(
 
 
 def to_fleet_policies(merged: dict[str, Any]) -> dict[str, Any]:
+    """Bloque privado leido por nuestras skills/hooks.
+    Incluye campos que el schema de OpenClaw rechazaria pero las skills
+    necesitan (chat_id default, spanish_text_in_images, chunk_max_chars).
+    """
     rt = merged.get("runtime", {})
+    tg = merged.get("channels", {}).get("telegram", {}) or {}
+    img_gen = rt.get("image_generation", {}) or {}
+    tts = rt.get("tts", {}) or {}
     return {
         "agent_id": merged.get("id"),
         "timeouts_s": rt.get("timeouts_s", {}),
@@ -215,6 +293,18 @@ def to_fleet_policies(merged: dict[str, Any]) -> dict[str, Any]:
         "hooks_posttool": merged.get("hooks_posttool", []),
         "hooks_session_start": merged.get("hooks_session_start", []),
         "owner_email": merged.get("identity", {}).get("owner"),
+        # Campos custom que NO van al openclaw.json (no estan en su schema):
+        "channels": {
+            "telegram": {
+                "chat_id": tg.get("chat_id"),  # default destino para skills (file-deliver, etc.)
+            }
+        },
+        "image_generation": {
+            "spanish_text_in_images": img_gen.get("spanish_text_in_images", True),
+        },
+        "tts": {
+            "chunk_max_chars": tts.get("chunk_max_chars", 4096),
+        },
     }
 
 
