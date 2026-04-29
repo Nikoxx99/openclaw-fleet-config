@@ -50,6 +50,13 @@ services:
       # Bundled skills dir — donde el entrypoint copia las skills privadas.
       OPENCLAW_BUNDLED_SKILLS_DIR: /data/.openclaw/skills
 
+      # ── Browser sidecar (replica el compose oficial coollabsio/openclaw) ──
+      # CDP (Chrome DevTools Protocol) en el sidecar `browser`. nginx del base
+      # proxea ademas /browser/ a http://browser:3000/ (VNC web UI).
+      BROWSER_CDP_URL: http://browser:9223
+      BROWSER_DEFAULT_PROFILE: openclaw
+      BROWSER_EVALUATE_ENABLED: "true"
+
       # ── Auth nginx (opcional pero recomendado para exposicion publica) ──
       AUTH_USERNAME: ${AUTH_USERNAME:-admin}
       AUTH_PASSWORD: ${AUTH_PASSWORD}
@@ -80,20 +87,16 @@ services:
       - agent01_data:/data
       - agent01_logs:/var/log/agente
 
+    depends_on:
+      # nginx del base resuelve el upstream `browser` al startup; el harness
+      # ademas usa BROWSER_CDP_URL para la CDP. Sin este service el container
+      # no arranca (host not found).
+      - browser
+
     ports:
       # 8080 = nginx (publico via Coolify, con basic auth si AUTH_PASSWORD esta).
       # 18789 NO se expone — solo accesible internamente via nginx.
       - "${PORT_AGENT01:-0}:8080"
-
-    extra_hosts:
-      # nginx del base genera un `location /browser/ { proxy_pass http://browser:3000/ }`
-      # apuntando a un sidecar opcional (kasmweb/chrome) que NO declaramos. nginx
-      # resuelve upstreams estaticos al startup; sin entrada DNS, nginx -t falla
-      # con "host not found in upstream 'browser'" y el container hace restart loop.
-      # Stub a 127.0.0.1: nginx arranca, /browser/ responde 502 si alguien lo pega
-      # (esperable sin sidecar real). Si llegas a montar el browser sidecar real,
-      # quita esta linea y agrega un service `browser` al compose.
-      - "browser:127.0.0.1"
 
     healthcheck:
       # /healthz lo expone nginx del base sin pasar por basic auth, asi que
@@ -104,6 +107,27 @@ services:
       retries: 3
       start_period: 60s
 
+  # Browser sidecar — replica el patron del docker-compose oficial de
+  # coollabsio/openclaw. Provee:
+  #   - CDP en :9223 (consumido por el harness via BROWSER_CDP_URL)
+  #   - VNC web UI en :3000 (proxy via nginx en /browser/)
+  # No publicamos puertos al host: todo se accede a traves del nginx del
+  # service `agent01` (basic auth opcional), que ya tiene la location /browser/.
+  browser:
+    image: coollabsio/openclaw-browser:latest
+    restart: unless-stopped
+    environment:
+      PUID: 1000
+      PGID: 1000
+      TZ: ${TZ:-Etc/UTC}
+      CHROME_CLI: "--remote-debugging-port=9222"
+    volumes:
+      - browser_data:/config
+    # Chrome necesita /dev/shm grande o crashea cargando paginas con muchas
+    # imagenes/iframes. 2GiB es el default que recomienda el image oficial.
+    shm_size: 2g
+
 volumes:
   agent01_data:
   agent01_logs:
+  browser_data:
