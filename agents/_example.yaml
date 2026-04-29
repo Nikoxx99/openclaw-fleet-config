@@ -1,0 +1,49 @@
+# agents/_example.yaml — TEMPLATE. Copia este archivo a `<id>.yaml` y
+# rellena los TODO. El `id` debe coincidir con el filename y con el
+# AGENT_ID que pasas a Coolify.
+#
+# Solo declara aqui lo que CAMBIA respecto a profiles/base.yaml.
+# Todo lo demas se hereda automaticamente al compilar.
+
+id: example                          # TODO: filename slug, ej. "alice"
+extends: profiles/base.yaml
+
+identity:
+  name: "Agente Example"             # TODO
+  owner: "owner@example.com"         # TODO: email del owner del agente
+  # locale, tone, judgment_rules → heredan del base. Override solo si necesario.
+
+channels:
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN_EXAMPLE}"   # TODO: secret en Coolify
+    chat_id: "${TELEGRAM_CHAT_ID_EXAMPLE}"       # TODO: chat id del owner
+
+# Override de modelo solo si este agente necesita uno distinto al base.
+# runtime:
+#   model:
+#     primary: anthropic/claude-opus-4-7
+#   tts:
+#     voice_id: "${TTS_VOICE_ID_EXAMPLE}"
+
+# Skills extra (alem de las heredadas en base). Borrar las que NO uses.
+# skills:
+#   - private/audio-transcribe
+#   - private/tts-emit
+#   - private/image-preprocess
+#   - private/pdf-read-with-ocr-fallback
+#   - private/file-deliver
+#   - private/web-fetch
+#   - private/image-generate
+#   - private/presentations
+
+# Politicas extra para este agente.
+policies:
+  private_domains:                   # web-fetch interact gate
+    - "intranet.example.com"
+
+deployment:
+  coolify_app_id: "openclaw-example"  # TODO: nombre del recurso en Coolify
+  resources:
+    memory: 2Gi
+    cpu: "1"

@@ -1,0 +1,22 @@
+# Compilados y artefactos locales (nunca commit).
+*.compiled.json
+__pycache__/
+*.pyc
+.venv/
+node_modules/
+
+# Editor / OS.
+.DS_Store
+.idea/
+.vscode/
+
+# Secretos accidentales.
+.env
+.env.local
+*.pem
+*.key
+credentials.json
+
+# Logs locales de prueba.
+*.log
+*.jsonl

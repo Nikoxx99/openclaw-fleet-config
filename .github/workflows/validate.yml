@@ -1,0 +1,65 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  compile-all-agents:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install pyyaml
+
+      - name: Compile every agent (with dummy env)
+        env:
+          OPENAI_API_KEY: "dummy"
+          GEMINI_API_KEY: "dummy"
+          FIRECRAWL_API_KEY: "dummy"
+          MINIMAX_API_KEY: "dummy"
+          R2_BUCKET: "dummy"
+          R2_ACCESS_KEY_ID: "dummy"
+          R2_SECRET_ACCESS_KEY: "dummy"
+        run: |
+          set -e
+          mkdir -p /tmp/out
+          shopt -s nullglob
+          fail=0
+          for agent in agents/*.yaml; do
+            name=$(basename "$agent" .yaml)
+            [ "$name" = "_example" ] && continue
+            upper=$(printf '%s' "$name" | tr '[:lower:]' '[:upper:]')
+            export "TELEGRAM_BOT_TOKEN_${upper}=dummy"
+            export "TELEGRAM_CHAT_ID_${upper}=dummy"
+            echo "Compiling $name..."
+            if ! python3 scripts/compile.py --base profiles/base.yaml --agent "$agent" --out-dir "/tmp/out/$name"; then
+              fail=1
+            fi
+          done
+          if [ $fail -ne 0 ]; then
+            echo "::error::one or more agents failed to compile"
+            exit 1
+          fi
+
+  hooks-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dev deps
+        run: npm i -D tsx typescript @types/node
+      - name: Typecheck hooks
+        run: npx tsc --noEmit --target es2022 --module nodenext --moduleResolution nodenext --strict hooks/*.ts

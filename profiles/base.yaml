@@ -1,0 +1,167 @@
+# Defaults heredables del Fleet de agentes OpenClaw.
+# Cada agente individual extiende este archivo (extends: profiles/base.yaml)
+# y solo declara los campos que cambian (id, owner, chat_id, deltas).
+#
+# Los `${VAR_NAME}` se expanden desde environment variables en compile time
+# (ver scripts/compile.py). Cada agente solo necesita exponer en Coolify los
+# secrets de su delta — los compartidos por todos viven en el env del proyecto.
+
+schema_version: 1
+
+identity:
+  locale: es-ES
+  tone: "amigable, profesional, directo, informativo"
+  judgment_rules:
+    - "Proactivo, util, honesto cuando algo no se puede hacer"
+    - "TTS solo si se pide explicito o el contexto lo amerita"
+    - "Nunca enviar rutas de archivo al usuario; adjuntar el archivo"
+
+runtime:
+  workspace: /data/workspace
+  model:
+    primary: minimax/MiniMax-M2.7
+    fallback: null
+  image_input:
+    primary: minimax/MiniMax-VL-01
+    fallbacks: []
+  image_generation:
+    primary: google/gemini-3-pro-image-preview
+    fallbacks:
+      - openai/gpt-image-2
+    spanish_text_in_images: true
+  tts:
+    enabled: true
+    mode: final
+    provider: minimax
+    model: speech-2.8-hd
+    voice_id: moss_audio_cfe8764a-3837-11f1-8aa8-1efaa00e25e8
+    chunk_max_chars: 4096
+
+  timeouts_s:
+    llm_chat: 90
+    image_gen: 120
+    tts: 60
+    transcription: 180
+    scraping: 60
+    telegram_send: 30
+  retry:
+    max_attempts: 3
+    backoff_base_s: 1
+    backoff_factor: 2
+    jitter_pct: 20
+    only_on: [429, "5xx", timeout, connection]
+  circuit_breaker:
+    threshold_failures: 5
+    window_s: 60
+    open_duration_s: 300
+  sandbox:
+    workdir: /tmp/agente-{{id}}
+    cleanup_after_days: 7
+    persistent_dir_env: DATA_DIR
+  health:
+    endpoint: /health
+    port: 8080
+    coolify_check_interval_s: 30
+  crash_recovery:
+    enabled: true
+    log_path: /var/log/agente/last.jsonl
+
+observability:
+  log_format: jsonl
+  log_to: stdout
+  level_default: INFO
+  level_debug_env: DEBUG
+  heartbeat_interval_s: 300
+  metrics:
+    - response_time_ms
+    - cost_usd
+    - tools_invoked
+
+gateway:
+  port: 18789
+  mode: local
+  bind: loopback
+
+session:
+  dm_scope: per-channel-peer
+
+tools:
+  profile: coding
+  web:
+    search:
+      provider: firecrawl
+      enabled: true
+
+channels:
+  telegram:
+    enabled: true
+    # chat_id y bot_token_ref los define cada agente.
+
+skills:
+  # Oficiales (clawhub install)
+  - openclaw/nano-pdf
+  - openclaw/docx
+  - openclaw/xlsx
+  - openclaw/pptx
+  - openclaw/openai-whisper-api
+  - firecrawl/firecrawl
+  - halthelobster/proactive-agent
+  # Privadas del fleet (agentes/skills/)
+  - private/audio-transcribe
+  - private/tts-emit
+  - private/image-preprocess
+  - private/pdf-read-with-ocr-fallback
+  - private/file-deliver
+  - private/web-fetch
+  - private/image-generate
+  - private/presentations
+
+hooks_pretool:
+  # Privadas del fleet (agentes/hooks/)
+  - private/secret-redaction
+  - private/path-scrubber
+  - private/sensitive-image-gate
+  - private/confirm-high-impact
+  - private/rate-limit
+hooks_posttool:
+  - private/structured-logger
+hooks_session_start:
+  - private/crash-recovery
+
+policies:
+  confirmation_required:
+    - email.send
+    - slack.dm.third_party
+    - whatsapp.send.third_party
+    - telegram.send.third_party
+    - payment.any
+    - fs.delete_outside_tmp
+    - calendar.delete
+    - integration.rotate_keys
+    - social.publish
+  path_scrubber: true
+  secret_redaction: true
+  sensitive_image_gate: true
+  rate_limits:
+    image_gen_per_user_s: 10
+    llm_per_user_min: 20
+    burst_collapse_window_s: 4
+
+hooks:
+  internal:
+    session-memory:
+      enabled: true
+
+# Nombres de secrets en Coolify (NO valores).
+# Cada agente añade su TELEGRAM_BOT_TOKEN_<ID> propio.
+secrets_ref:
+  - OPENAI_API_KEY
+  - GEMINI_API_KEY
+  - FIRECRAWL_API_KEY
+  - MINIMAX_API_KEY
+
+deployment:
+  resources:
+    memory: 2Gi
+    cpu: "1"
+  # coolify_app_id lo define cada agente.
