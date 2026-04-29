@@ -64,14 +64,23 @@ python3 "$FLEET_DIR/scripts/compile.py" \
   --agent "$AGENT_YAML" \
   --out-dir "$OPENCLAW_HOME"
 
-# 4) Montar skills (symlink) en el dir que el harness escanea.
-mkdir -p "$OPENCLAW_HOME/skills"
+# 4) Copiar skills privadas al dir bundled que OpenClaw escanea.
+#    Importante: cp -r y NO symlink. OpenClaw rechaza symlinks que apunten
+#    fuera del root bundled (security check bundled-symlink-escape en
+#    src/agents/skills/workspace.ts). Las paths bajo /opt/fleet quedan
+#    fuera del root, asi que symlinks ahi son ignorados silenciosamente.
+SKILLS_DEST="${OPENCLAW_BUNDLED_SKILLS_DIR:-$OPENCLAW_HOME/skills}"
+mkdir -p "$SKILLS_DEST"
+mounted=0
 for skill_dir in "$FLEET_DIR/skills/"*/; do
   [ -d "$skill_dir" ] || continue
   name=$(basename "$skill_dir")
-  ln -sfn "$skill_dir" "$OPENCLAW_HOME/skills/$name"
+  # Guard contra rm -rf con SKILLS_DEST vacio.
+  rm -rf "${SKILLS_DEST:?}/${name}"
+  cp -r "$skill_dir" "$SKILLS_DEST/$name"
+  mounted=$((mounted + 1))
 done
-log "mounted $(ls "$OPENCLAW_HOME/skills" 2>/dev/null | wc -l) skills"
+log "copied $mounted private skills into $SKILLS_DEST"
 
 # 5) Montar hooks (.ts) en /opt/hooks.
 for hook in "$FLEET_DIR/hooks/"*.ts; do
