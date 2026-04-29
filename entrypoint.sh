@@ -1,37 +1,59 @@
 #!/usr/bin/env bash
-# entrypoint.sh — clona el repo de fleet, compila la config del agente
-# definido en $AGENT_ID, materializa skills/hooks, y arranca el gateway.
+# fleet-init.sh — hook que corre la imagen base coollabsio/openclaw via
+# OPENCLAW_DOCKER_INIT_SCRIPT. Se ejecuta DESPUES del setup de /data y la
+# validacion de gateway token + provider keys, pero ANTES de:
+#   - configure.js (env → /data/.openclaw/openclaw.json)
+#   - openclaw doctor --fix
+#   - nginx + openclaw gateway run
 #
-# Vars esperadas (Coolify):
-#   AGENT_ID         ej. "alice" — debe existir agents/${AGENT_ID}.yaml
-#   FLEET_REF        branch o tag (default: main)
-#   FLEET_REPO_URL   default: https://github.com/Nikoxx99/openclaw-fleet-config.git
+# Por eso solo nos toca:
+#   1) Resolver AGENT_ID (1er arg del compose command, o env var).
+#   2) Re-exportar TELEGRAM_BOT_TOKEN/CHAT_ID con sufijo _<UPPER(ID)> para
+#      que compile.py pueda expandir ${TELEGRAM_BOT_TOKEN_AGENT01}.
+#   3) Clonar fleet-config (best-effort: si falla, usar la copia horneada).
+#   4) Correr compile.py → escribir openclaw.json a $OPENCLAW_CUSTOM_CONFIG
+#      (default /app/config/openclaw.json). configure.js del base lo lee
+#      como capa base y le aplica env-driven overrides encima.
+#   5) Materializar skills privadas en $OPENCLAW_BUNDLED_SKILLS_DIR.
+#   6) Materializar hooks en $HOOKS_DIR.
+#   7) Crear sandbox dirs.
+#
+# Vars (Coolify):
+#   AGENT_ID                  ej. "agent01" — debe existir agents/${AGENT_ID}.yaml
+#   FLEET_REF                 branch o tag (default: main)
+#   FLEET_REPO_URL            default: https://github.com/Nikoxx99/openclaw-fleet-config.git
+#   OPENCLAW_CUSTOM_CONFIG    default: /app/config/openclaw.json
+#   OPENCLAW_BUNDLED_SKILLS_DIR  default: /data/.openclaw/skills
 #   + todos los ${VAR} referenciados desde el YAML del agente
 
 set -euo pipefail
 
-# AGENT_ID puede venir de:
-#   - el primer argumento del comando (compose: command: ["agent01"]) — preferido
-#   - o de la env var AGENT_ID (deploy manual / docker run -e AGENT_ID=...)
-# El primer arg gana porque en Coolify multi-service las env vars con el mismo
-# nombre se deduplican entre services (issue coollabsio/coolify#7655) y todos
-# los containers acabarian con el mismo AGENT_ID.
+# ── 1) Resolver AGENT_ID ─────────────────────────────────────────────────────
+# La base entrypoint nos pasa los argumentos del compose `command`.
+# Por eso `command: ["agent01"]` llega aqui como $1.
 AGENT_ID="${1:-${AGENT_ID:-}}"
-: "${AGENT_ID:?AGENT_ID is required (pass as first arg in compose: command: [\"agent01\"])}"
+: "${AGENT_ID:?AGENT_ID is required (set via compose command: [\"agent01\"] or env var AGENT_ID)}"
 : "${FLEET_REF:=main}"
 : "${FLEET_REPO_URL:=https://github.com/Nikoxx99/openclaw-fleet-config.git}"
 : "${FLEET_DIR:=/opt/fleet}"
 : "${HOOKS_DIR:=/opt/hooks}"
-: "${OPENCLAW_HOME:=/home/node}"
-: "${OPENCLAW_CONFIG_DIR:=$OPENCLAW_HOME/.openclaw}"
+: "${OPENCLAW_CUSTOM_CONFIG:=/app/config/openclaw.json}"
+: "${OPENCLAW_STATE_DIR:=/data/.openclaw}"
+: "${OPENCLAW_BUNDLED_SKILLS_DIR:=$OPENCLAW_STATE_DIR/skills}"
+: "${VENV_DIR:=/opt/venv}"
 
-log() { printf '{"ts":"%s","level":"INFO","event":"entrypoint","msg":"%s"}\n' "$(date -u +%FT%TZ)" "$1"; }
-err() { printf '{"ts":"%s","level":"ERROR","event":"entrypoint","msg":"%s"}\n' "$(date -u +%FT%TZ)" "$1" >&2; }
+PYTHON_BIN="${VENV_DIR}/bin/python3"
+[ -x "$PYTHON_BIN" ] || PYTHON_BIN="$(command -v python3)"
 
-# 0) Re-exportar env vars per-agent con el nombre que el YAML espera.
-#    Coolify pasa TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID con nombres fijos
-#    (no puede interpolar en YAML keys). El YAML del agente referencia
-#    ${TELEGRAM_BOT_TOKEN_AGENT01} — aqui lo creamos.
+log() { printf '{"ts":"%s","level":"INFO","event":"fleet-init","agent":"%s","msg":"%s"}\n' "$(date -u +%FT%TZ)" "$AGENT_ID" "$1"; }
+err() { printf '{"ts":"%s","level":"ERROR","event":"fleet-init","agent":"%s","msg":"%s"}\n' "$(date -u +%FT%TZ)" "$AGENT_ID" "$1" >&2; }
+
+log "starting fleet init for agent=${AGENT_ID}"
+
+# ── 2) Re-exportar env vars con sufijo _<UPPER(ID)> ──────────────────────────
+# Coolify pasa TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID con nombres fijos (no puede
+# interpolar dentro de keys YAML). El YAML del agente referencia
+# ${TELEGRAM_BOT_TOKEN_AGENT01} — aqui lo creamos.
 upper=$(printf '%s' "$AGENT_ID" | tr '[:lower:]-' '[:upper:]_')
 if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
   export "TELEGRAM_BOT_TOKEN_${upper}=${TELEGRAM_BOT_TOKEN}"
@@ -40,63 +62,109 @@ if [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
   export "TELEGRAM_CHAT_ID_${upper}=${TELEGRAM_CHAT_ID}"
 fi
 
-# 1) Clonar / actualizar fleet config.
-if [ ! -d "$FLEET_DIR/.git" ]; then
-  log "cloning ${FLEET_REPO_URL}@${FLEET_REF}"
-  git clone --depth 1 --branch "$FLEET_REF" "$FLEET_REPO_URL" "$FLEET_DIR"
+# ── 3) Clonar fleet config (best-effort) ─────────────────────────────────────
+# Si el repo es publico y la red esta arriba, clonar nos garantiza la version
+# mas reciente. Si falla (red caida, repo privado sin token), caemos a la copia
+# que el Dockerfile horneo en /opt/fleet-{scripts,profiles,agents,skills,hooks}.
+SOURCE_DIR=""
+if git ls-remote --exit-code "$FLEET_REPO_URL" "$FLEET_REF" >/dev/null 2>&1; then
+  if [ ! -d "$FLEET_DIR/.git" ]; then
+    log "cloning ${FLEET_REPO_URL}@${FLEET_REF}"
+    rm -rf "$FLEET_DIR"
+    git clone --depth 1 --branch "$FLEET_REF" "$FLEET_REPO_URL" "$FLEET_DIR"
+  else
+    log "fleet dir exists; pulling ${FLEET_REF}"
+    git -C "$FLEET_DIR" fetch --depth 1 origin "$FLEET_REF"
+    git -C "$FLEET_DIR" checkout -B "$FLEET_REF" "origin/${FLEET_REF}"
+  fi
+  SOURCE_DIR="$FLEET_DIR"
 else
-  log "fleet dir exists; pulling ${FLEET_REF}"
-  git -C "$FLEET_DIR" fetch --depth 1 origin "$FLEET_REF"
-  git -C "$FLEET_DIR" checkout -B "$FLEET_REF" "origin/${FLEET_REF}"
+  err "git remote unreachable; falling back to baked-in copy at /opt/fleet-*"
+  # Reconstruimos el layout esperado en $FLEET_DIR usando la copia horneada.
+  rm -rf "$FLEET_DIR"
+  mkdir -p "$FLEET_DIR"
+  for sub in scripts profiles agents skills hooks; do
+    [ -d "/opt/fleet-${sub}" ] && cp -r "/opt/fleet-${sub}" "$FLEET_DIR/${sub}"
+  done
+  SOURCE_DIR="$FLEET_DIR"
 fi
 
-# 2) Validar que el agente existe.
-AGENT_YAML="$FLEET_DIR/agents/${AGENT_ID}.yaml"
+# ── 4) Validar que el agente existe ──────────────────────────────────────────
+AGENT_YAML="$SOURCE_DIR/agents/${AGENT_ID}.yaml"
 if [ ! -f "$AGENT_YAML" ]; then
-  err "agent file not found: agents/${AGENT_ID}.yaml in ref=${FLEET_REF}"
+  err "agent file not found: agents/${AGENT_ID}.yaml in source=${SOURCE_DIR}"
   exit 2
 fi
 
-# 3) Compilar YAML → openclaw.json + fleet-policies.json + prompt.md
-mkdir -p "$OPENCLAW_CONFIG_DIR"
-log "compiling agent ${AGENT_ID} → $OPENCLAW_CONFIG_DIR"
-python3 "$FLEET_DIR/scripts/compile.py" \
-  --base "$FLEET_DIR/profiles/base.yaml" \
+# ── 5) Compilar YAML → openclaw.json + fleet-policies.json + prompt.md ──────
+# Escribimos al custom config mount (/app/config/openclaw.json) — la imagen
+# base lo carga como capa baja y aplica env-driven overrides arriba.
+# fleet-policies.json y prompt.md van al state dir para que skills/hooks
+# privados los lean.
+mkdir -p "$(dirname "$OPENCLAW_CUSTOM_CONFIG")" "$OPENCLAW_STATE_DIR"
+log "compiling agent ${AGENT_ID} → $OPENCLAW_CUSTOM_CONFIG"
+"$PYTHON_BIN" "$SOURCE_DIR/scripts/compile.py" \
+  --base "$SOURCE_DIR/profiles/base.yaml" \
   --agent "$AGENT_YAML" \
-  --out-dir "$OPENCLAW_CONFIG_DIR"
+  --out-dir "$OPENCLAW_STATE_DIR"
 
-# 4) Copiar skills privadas al dir bundled que OpenClaw escanea.
-#    Importante: cp -r y NO symlink. OpenClaw rechaza symlinks que apunten
-#    fuera del root bundled (security check bundled-symlink-escape en
-#    src/agents/skills/workspace.ts). Las paths bajo /opt/fleet quedan
-#    fuera del root, asi que symlinks ahi son ignorados silenciosamente.
-SKILLS_DEST="${OPENCLAW_BUNDLED_SKILLS_DIR:-$OPENCLAW_CONFIG_DIR/skills}"
-mkdir -p "$SKILLS_DEST"
+# El compile.py escribe openclaw.json en --out-dir; lo movemos al custom
+# config path que la imagen base lee como capa baja.
+if [ -f "$OPENCLAW_STATE_DIR/openclaw.json" ]; then
+  mv "$OPENCLAW_STATE_DIR/openclaw.json" "$OPENCLAW_CUSTOM_CONFIG"
+  chmod 600 "$OPENCLAW_CUSTOM_CONFIG"
+  log "openclaw.json placed at $OPENCLAW_CUSTOM_CONFIG"
+fi
+
+# Borramos la copia persistida del boot anterior. configure.js del base hace
+# deepMerge(custom, persisted) — sin este wipe, valores del boot pasado
+# (e.g., voice_id antigua, modelo viejo) sobreescriben los del YAML nuevo
+# y los cambios git push → redeploy no surten efecto hasta que el operador
+# wipea el volume. Nuestra fuente de verdad es el YAML; la persistencia es
+# solo cache de runtime (gateway.token, credentials/, agents/auth-profiles).
+PERSISTED_CONFIG="${OPENCLAW_CONFIG_PATH:-$OPENCLAW_STATE_DIR/openclaw.json}"
+if [ -f "$PERSISTED_CONFIG" ]; then
+  rm -f "$PERSISTED_CONFIG"
+  log "wiped stale persisted config at $PERSISTED_CONFIG (fleet redeploys are declarative)"
+fi
+
+# ── 6) Copiar skills privadas al dir bundled que OpenClaw escanea ───────────
+# Importante: cp -r y NO symlink. OpenClaw rechaza symlinks que apunten fuera
+# del root bundled (security check bundled-symlink-escape en
+# src/agents/skills/workspace.ts). Las paths bajo /opt/fleet quedan fuera del
+# root, asi que symlinks ahi son ignorados silenciosamente.
+mkdir -p "$OPENCLAW_BUNDLED_SKILLS_DIR"
 mounted=0
-for skill_dir in "$FLEET_DIR/skills/"*/; do
-  [ -d "$skill_dir" ] || continue
-  name=$(basename "$skill_dir")
-  # Guard contra rm -rf con SKILLS_DEST vacio.
-  rm -rf "${SKILLS_DEST:?}/${name}"
-  cp -r "$skill_dir" "$SKILLS_DEST/$name"
-  mounted=$((mounted + 1))
-done
-log "copied $mounted private skills into $SKILLS_DEST"
+if [ -d "$SOURCE_DIR/skills" ]; then
+  for skill_dir in "$SOURCE_DIR/skills/"*/; do
+    [ -d "$skill_dir" ] || continue
+    name=$(basename "$skill_dir")
+    # Guard contra rm -rf con dir vacio.
+    rm -rf "${OPENCLAW_BUNDLED_SKILLS_DIR:?}/${name}"
+    cp -r "$skill_dir" "$OPENCLAW_BUNDLED_SKILLS_DIR/$name"
+    mounted=$((mounted + 1))
+  done
+fi
+log "copied $mounted private skills into $OPENCLAW_BUNDLED_SKILLS_DIR"
 
-# 5) Montar hooks (.ts) en /opt/hooks.
-for hook in "$FLEET_DIR/hooks/"*.ts; do
-  [ -f "$hook" ] || continue
-  cp "$hook" "$HOOKS_DIR/"
-  chmod +x "$HOOKS_DIR/$(basename "$hook")"
-done
-log "mounted $(ls "$HOOKS_DIR"/*.ts 2>/dev/null | wc -l) hooks"
+# ── 7) Montar hooks (.ts) en /opt/hooks ─────────────────────────────────────
+if [ -d "$SOURCE_DIR/hooks" ]; then
+  for hook in "$SOURCE_DIR/hooks/"*.ts; do
+    [ -f "$hook" ] || continue
+    cp "$hook" "$HOOKS_DIR/"
+    chmod +x "$HOOKS_DIR/$(basename "$hook")" 2>/dev/null || true
+  done
+fi
+hooks_count=$(ls "$HOOKS_DIR"/*.ts 2>/dev/null | wc -l | tr -d ' ')
+log "mounted $hooks_count hooks in $HOOKS_DIR"
 
-# 6) Sandbox dir del agente.
+# ── 8) Sandbox dir del agente ────────────────────────────────────────────────
 SANDBOX="/tmp/agente-${AGENT_ID}"
 mkdir -p "$SANDBOX"/{img,img-gen,tts,decks}
 log "sandbox ready at $SANDBOX"
 
-# 7) Arrancar el gateway oficial. Bind=lan para que Coolify lo enrute.
-#    `--allow-unconfigured` deja arrancar mientras la onboarding inicial corre.
-log "starting openclaw gateway for agent=${AGENT_ID}"
-exec node /app/openclaw.mjs gateway --bind=lan --allow-unconfigured
+log "fleet init complete; handing back to base entrypoint"
+
+# El base entrypoint continua: configure.js → doctor --fix → nginx → gateway.
+# No exec aqui — solo retorno 0.
+exit 0

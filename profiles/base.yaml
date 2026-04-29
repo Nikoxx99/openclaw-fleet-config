@@ -53,9 +53,10 @@ providers:
     always_enabled: true
 
 runtime:
-  # Alineado con la imagen oficial openclaw: /home/node/.openclaw es el OPENCLAW_HOME
-  # canonico (user node, uid 1000). El volume de Coolify monta el workspace ahi.
-  workspace: /home/node/.openclaw/workspace
+  # Alineado con la imagen oficial coollabsio/openclaw:latest: el state vive en
+  # /data/.openclaw (HOME=/data) y el workspace de proyectos en /data/workspace.
+  # El volume de Coolify monta /data completo, asi que ambos paths persisten.
+  workspace: /data/workspace
   model:
     primary: minimax/MiniMax-M2.7
     fallback: null
@@ -97,7 +98,9 @@ runtime:
     cleanup_after_days: 7
     persistent_dir_env: DATA_DIR
   health:
-    endpoint: /health
+    # nginx del base expone /healthz en 8080 (sin basic auth) → bypass al
+    # gateway en 18789. Coolify chequea aqui cada 30s.
+    endpoint: /healthz
     port: 8080
     coolify_check_interval_s: 30
   crash_recovery:

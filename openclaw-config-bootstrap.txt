@@ -1,0 +1,76 @@
+# openclaw-config-bootstrap.txt
+# Secuencia equivalente de `openclaw config set` para recrear lo que el
+# fleet compile.py escribe en /app/config/openclaw.json (la imagen base
+# coollabsio/openclaw lo carga como capa baja).
+# Util como referencia, debug o fallback manual dentro del container.
+#
+# Notas:
+#   - `config set` espera SOLO 2 args posicionales: <path> y <value>.
+#     Para keys con caracteres especiales (`:`, `-`, etc.) van dentro del
+#     mismo path en dot-notation: `auth.profiles.openai:global`.
+#   - Para SecretRefs el patron es: --ref-provider <alias> --ref-source
+#     <env|file|exec> --ref-id <NOMBRE>. NO se pasa el nombre del env var
+#     a --ref-source.
+#   - Paths actualizados a /data/* — la imagen oficial usa /data como HOME
+#     (state en /data/.openclaw, workspace en /data/workspace).
+# 1) Gateway
+openclaw config set gateway.port 18789
+openclaw config set gateway.mode local
+openclaw config set gateway.bind lan
+# 2) Agents defaults (workspace, modelos primarios, aliases)
+openclaw config set agents.defaults.workspace /data/workspace
+openclaw config set agents.defaults.model.primary minimax/MiniMax-M2.7
+openclaw config set agents.defaults.imageModel.primary minimax/MiniMax-VL-01
+openclaw config set agents.defaults.imageModel.fallbacks '[]'
+openclaw config set agents.defaults.imageGenerationModel.primary google/gemini-3-pro-image-preview
+openclaw config set agents.defaults.imageGenerationModel.fallbacks '["openai/gpt-image-2"]'
+openclaw config set agents.defaults.models '{"minimax/MiniMax-M2.7":{"alias":"Minimax"},"minimax/MiniMax-VL-01":{"alias":"Minimax"},"google/gemini-3-pro-image-preview":{"alias":"Gemini"}}' --strict-json --merge
+# 3) Channels — Telegram
+openclaw config set channels.telegram.enabled true
+openclaw config set channels.telegram.botToken --ref-provider default --ref-source env --ref-id TELEGRAM_BOT_TOKEN
+openclaw config set channels.telegram.dmPolicy pairing
+# Opcional: lista blanca de usernames que pueden DMear al bot
+# openclaw config set channels.telegram.allowFrom '["@usuario1","@usuario2"]'
+# 4) Tools (profile + web search)
+openclaw config set tools.profile coding
+openclaw config set tools.web.search.provider firecrawl
+openclaw config set tools.web.search.enabled true
+# 5) Session
+openclaw config set session.dmScope per-channel-peer
+# 6) Plugins (habilitar cada uno + firecrawl con config nested)
+openclaw config set plugins.entries.openai.enabled true
+openclaw config set plugins.entries.google.enabled true
+openclaw config set plugins.entries.minimax.enabled true
+openclaw config set plugins.entries.firecrawl.enabled true
+openclaw config set plugins.entries.elevenlabs.enabled true
+openclaw config set plugins.entries.browser.enabled true
+openclaw config set plugins.entries.telegram.enabled true
+openclaw config set plugins.entries.firecrawl.config.webSearch.apiKey --ref-provider default --ref-source env --ref-id FIRECRAWL_API_KEY
+# 7) Auth profiles (un perfil por provider LLM) — el id del profile va en el path
+openclaw config set auth.profiles.openai:global '{"provider":"openai","mode":"api_key"}' --strict-json --merge
+openclaw config set auth.profiles.google:global '{"provider":"google","mode":"api_key"}' --strict-json --merge
+openclaw config set auth.profiles.minimax:global '{"provider":"minimax","mode":"api_key"}' --strict-json --merge
+# 8) Models providers (Minimax con baseUrl + anthropic-messages + authHeader)
+openclaw config set models.providers.minimax '{"api":"anthropic-messages","baseUrl":"https://api.minimax.io/anthropic","authHeader":true,"models":[{"id":"MiniMax-M2.7","name":"MiniMax M2.7","contextWindow":200000}]}' --strict-json --merge
+openclaw config set models.providers.minimax.apiKey --ref-provider default --ref-source env --ref-id MINIMAX_API_KEY
+openclaw config set models.mode merge
+# 9) Messages — TTS (Minimax)
+openclaw config set messages.tts.enabled true
+openclaw config set messages.tts.mode final
+openclaw config set messages.tts.provider minimax
+openclaw config set messages.tts.providers.minimax '{"model":"speech-2.8-hd","voiceId":"moss_audio_cfe8764a-3837-11f1-8aa8-1efaa00e25e8"}' --strict-json --merge
+openclaw config set messages.tts.providers.minimax.apiKey --ref-provider default --ref-source env --ref-id MINIMAX_API_KEY
+# 10) Skills install hint
+openclaw config set skills.install.nodeManager npm
+# 11) Hooks internos
+openclaw config set hooks.internal.enabled true
+openclaw config set hooks.internal.entries '{"session-memory":{"enabled":true}}' --strict-json --merge
+# 12) Verificar
+openclaw config file
+openclaw config schema
+openclaw config validate
+openclaw config get .
+# Atajos de deshacer (no ejecutar como parte del bootstrap)
+# openclaw config unset plugins.entries.elevenlabs
+# openclaw config unset auth.profiles.minimax:global
+# openclaw config unset channels.telegram.allowFrom

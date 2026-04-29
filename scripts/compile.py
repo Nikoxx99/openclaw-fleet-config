@@ -143,15 +143,22 @@ def build_provider_outputs(
 
 
 def _model_block(model_in: dict[str, Any]) -> dict[str, Any]:
-    """Schema OpenClaw espera {primary: string, fallback?: string}.
-    Drops `null`, drops keys con valor falsy."""
+    """Schema OpenClaw espera {primary: string, fallbacks?: string[]}.
+    Soporta el alias YAML `fallback` (singular string) por retro-compat:
+    si esta presente, se promueve a [fallback]. Drops nulls/falsy."""
     out: dict[str, Any] = {}
-    primary = model_in.get("primary") if isinstance(model_in, dict) else None
+    if not isinstance(model_in, dict):
+        return out
+    primary = model_in.get("primary")
     if primary:
         out["primary"] = primary
-    fallback = model_in.get("fallback") if isinstance(model_in, dict) else None
-    if fallback:
-        out["fallback"] = fallback
+    fallbacks = model_in.get("fallbacks")
+    if fallbacks:
+        out["fallbacks"] = list(fallbacks)
+    else:
+        legacy = model_in.get("fallback")
+        if legacy:
+            out["fallbacks"] = [legacy] if isinstance(legacy, str) else list(legacy)
     return out
 
 
@@ -252,7 +259,7 @@ def to_openclaw_json(
             agents_default_models[ref_source] = {"alias": alias}
 
     agents_defaults: dict[str, Any] = {
-        "workspace": rt.get("workspace", "/home/node/.openclaw/workspace"),
+        "workspace": rt.get("workspace", "/data/workspace"),
         "model": _model_block(rt.get("model", {})),
         "imageModel": _image_block(rt.get("image_input", {})),
         "imageGenerationModel": _image_block(rt.get("image_generation", {})),

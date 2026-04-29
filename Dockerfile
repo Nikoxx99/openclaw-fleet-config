@@ -1,34 +1,35 @@
-# OpenClaw Fleet — extiende la imagen oficial.
+# OpenClaw Fleet — extiende la imagen oficial Coolify-friendly.
 #
-# Capa minima sobre `ghcr.io/openclaw/openclaw:latest` que añade:
-#   - deps de sistema para las skills privadas (ffmpeg, tesseract, poppler, imagemagick)
-#   - venv Python con libs (pyyaml, Pillow, pdfplumber, langdetect)
-#   - entrypoint que clona fleet-config en runtime y compila la config del agente
+# Base: coollabsio/openclaw:latest (DockerHub) — la imagen "production-ready"
+# que mantiene Coollabs (los autores de Coolify). Provee:
+#   - openclaw CLI + bundled skills/plugins
+#   - nginx reverse proxy (8080) → openclaw gateway (18789)
+#   - basic auth opcional (AUTH_USERNAME/AUTH_PASSWORD)
+#   - hook OPENCLAW_DOCKER_INIT_SCRIPT para correr nuestra logica del fleet
+#     antes de configure.js + nginx + gateway
+#   - Linuxbrew, Go, uv, build-essential ya horneados en /home/linuxbrew
+#
+# Todo lo que añadimos aqui es delta: ffmpeg/tesseract/poppler/imagemagick/
+# python venv para nuestras skills privadas, mas el script de init que
+# clona el fleet repo y corre compile.py.
 #
 # El mismo container corre cualquier agente declarado en `agents/<id>.yaml`,
-# diferenciado por la env var AGENT_ID.
+# diferenciado por el primer arg del comando (compose: command: ["agent01"])
+# o la env var AGENT_ID.
 
-FROM ghcr.io/openclaw/openclaw:latest
+FROM coollabsio/openclaw:latest
 
-USER root
+# La imagen base corre como root; no cambiamos eso.
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     VENV_DIR=/opt/venv \
     FLEET_DIR=/opt/fleet \
-    HOOKS_DIR=/opt/hooks \
-    OPENCLAW_HOME=/home/node \
-    OPENCLAW_CONFIG_DIR=/home/node/.openclaw \
-    OPENCLAW_BUNDLED_SKILLS_DIR=/home/node/.openclaw/skills
-
-# Nota: OPENCLAW_HOME es el HOME del usuario (parent), OpenClaw concatena
-# `.openclaw` por su cuenta. Si lo seteamos a /home/node/.openclaw el harness
-# lo dobla a /home/node/.openclaw/.openclaw/. OPENCLAW_CONFIG_DIR es nuestro
-# alias interno para el dir donde compile.py escribe el openclaw.json final.
+    HOOKS_DIR=/opt/hooks
 
 # Sistema: ffmpeg (audio/concat), tesseract+spa+eng (OCR), poppler (pdftoppm),
-# imagemagick (identify para sensitive-image-gate), python+venv, jq.
-# git + ca-certificates ya estan en la imagen base.
+# imagemagick (identify para sensitive-image-gate), python+venv, jq, curl.
+# git + ca-certificates + nginx ya estan en la imagen base.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ffmpeg \
       tesseract-ocr tesseract-ocr-spa tesseract-ocr-eng \
@@ -36,11 +37,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       imagemagick \
       python3 python3-venv python3-pip \
       jq \
+      curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Permitir que ImageMagick lea PDFs (algunas distros lo deshabilitan por CVE-2016-3714).
-RUN sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy domain="coder" rights="read\|write" pattern="PDF" />|' \
-      /etc/ImageMagick-6/policy.xml || true
+# Probamos ambas rutas porque la base puede traer ImageMagick-6 o 7.
+RUN for f in /etc/ImageMagick-6/policy.xml /etc/ImageMagick-7/policy.xml; do \
+      [ -f "$f" ] && sed -i 's|<policy domain="coder" rights="none" pattern="PDF" />|<policy domain="coder" rights="read\|write" pattern="PDF" />|' "$f" || true; \
+    done
 
 # Venv para deps Python (limpio, no toca system Python). Recomendado en prod.
 RUN python3 -m venv $VENV_DIR && \
@@ -55,36 +59,32 @@ RUN python3 -m venv $VENV_DIR && \
 
 ENV PATH="$VENV_DIR/bin:$PATH"
 
-# Entrypoint y healthcheck del fleet.
-COPY entrypoint.sh /usr/local/bin/fleet-entrypoint.sh
-COPY scripts/healthcheck.sh /usr/local/bin/fleet-healthcheck.sh
-# Pre-crear OPENCLAW_CONFIG_DIR con ownership node:node ANTES del USER node.
-# Critico para que cuando Coolify/Docker monte el named volume sobre
-# /home/node/.openclaw, el mountpoint herede los permisos correctos. Si el
-# directorio no existe en la imagen, Docker crea el mount con root:root y
-# el harness explota con EACCES al intentar escribir credentials/, agents/,
-# memory/, bindings/ (todos uid 1000 = node).
-RUN chmod +x /usr/local/bin/fleet-entrypoint.sh /usr/local/bin/fleet-healthcheck.sh && \
-    install -d -m 0755 -o node -g node $FLEET_DIR $HOOKS_DIR && \
-    install -d -m 0700 -o node -g node /var/log/agente && \
-    install -d -m 0755 -o node -g node $OPENCLAW_HOME/.openclaw && \
-    install -d -m 0700 -o node -g node \
-        $OPENCLAW_HOME/.openclaw/credentials \
-        $OPENCLAW_HOME/.openclaw/workspace \
-        $OPENCLAW_HOME/.openclaw/agents \
-        $OPENCLAW_HOME/.openclaw/memory \
-        $OPENCLAW_HOME/.openclaw/bindings \
-        $OPENCLAW_HOME/.openclaw/identity \
-        $OPENCLAW_HOME/.openclaw/plugin-state
+# Pre-creamos los dirs que nuestro init usa. /data lo crea el entrypoint base
+# despues de montar el volume; aqui solo dejamos los dirs que NO viven en /data.
+RUN mkdir -p $FLEET_DIR $HOOKS_DIR /var/log/agente /app/config && \
+    chmod 755 $FLEET_DIR $HOOKS_DIR /app/config && \
+    chmod 700 /var/log/agente
 
-# Coolify hace healthcheck cada 30s. Override del HEALTHCHECK de la imagen base
-# para chequear el endpoint real del gateway (puerto 18789, /healthz).
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD /usr/local/bin/fleet-healthcheck.sh
+# Copiamos:
+#   - el init hook (lo que el base llama via OPENCLAW_DOCKER_INIT_SCRIPT)
+#   - una copia local del compile.py + scripts (sirve si FLEET_REPO_URL falla
+#     o si querés correr la imagen sin acceso a git)
+COPY entrypoint.sh /opt/fleet-init.sh
+COPY scripts/ /opt/fleet-scripts/
+COPY profiles/ /opt/fleet-profiles/
+COPY agents/ /opt/fleet-agents/
+COPY skills/ /opt/fleet-skills/
+COPY hooks/ /opt/fleet-hooks/
+RUN chmod +x /opt/fleet-init.sh /opt/fleet-scripts/*.sh 2>/dev/null || true
 
-# Volver al usuario node (lo que la imagen oficial usa por defecto).
-USER node
-
-EXPOSE 18789
-
-ENTRYPOINT ["/usr/local/bin/fleet-entrypoint.sh"]
+# La imagen base ya define ENTRYPOINT y HEALTHCHECK; los respetamos.
+# El entrypoint base hace:
+#   1) setup persistent storage en /data
+#   2) valida OPENCLAW_GATEWAY_TOKEN + 1 LLM provider
+#   3) corre OPENCLAW_DOCKER_INIT_SCRIPT (= /opt/fleet-init.sh)  ← nuestro hook
+#   4) corre configure.js (env → openclaw.json, layer-merge con custom config)
+#   5) openclaw doctor --fix
+#   6) genera nginx config
+#   7) arranca nginx + openclaw gateway run
+#
+# EXPOSE 8080 ya esta heredado del base.
