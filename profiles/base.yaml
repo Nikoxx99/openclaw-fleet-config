@@ -27,9 +27,12 @@ providers:
   openai:
     api_key_env: OPENAI_API_KEY
     auth_profile: "openai:global"
-  gemini:
+  # Plugin id es "google" (ver extensions/google/ del repo openclaw — maneja
+  # toda la familia Google: Gemini, Vertex, embeddings). "gemini" no existe
+  # como plugin id, solo como model family dentro de google/.
+  google:
     api_key_env: GEMINI_API_KEY
-    auth_profile: "gemini:global"
+    auth_profile: "google:global"
   minimax:
     api_key_env: MINIMAX_API_KEY
     auth_profile: "minimax:global"
