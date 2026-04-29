@@ -50,6 +50,20 @@ services:
       # Bundled skills dir — donde el entrypoint copia las skills privadas.
       OPENCLAW_BUNDLED_SKILLS_DIR: /data/.openclaw/skills
 
+      # ── Runtime tuning ─────────────────────────────────────────────────
+      # 2GiB heap — match con deployment.resources.memory de base.yaml.
+      # Sin esto V8 corta ~1.4GiB y con 69 plugins cargados explotamos.
+      NODE_OPTIONS: --max-old-space-size=2048
+      # Mas threads en libuv para acelerar reads paralelos al boot.
+      UV_THREADPOOL_SIZE: 16
+      # Forzar polling en chokidar — evitamos EMFILE: too many open files
+      # del inotify watch limit (no podemos subir fs.inotify.max_user_watches
+      # en infra shared de Coolify). Trade-off: stat-loop cada 5s en lugar
+      # de eventos kernel, pero los skills/hooks/config solo cambian en
+      # redeploy asi que el costo de CPU es despreciable.
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "5000"
+
       # ── Browser sidecar (replica el compose oficial coollabsio/openclaw) ──
       # CDP (Chrome DevTools Protocol) en el sidecar `browser`. nginx del base
       # proxea ademas /browser/ a http://browser:3000/ (VNC web UI).
