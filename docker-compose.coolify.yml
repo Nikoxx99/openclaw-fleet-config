@@ -40,8 +40,12 @@ services:
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
     volumes:
-      - agent01_data:/home/node/.openclaw/workspace
-      - agent01_creds:/home/node/.openclaw/credentials
+      # Volume unico por agente — persiste todo el state subtree:
+      #   credentials/ (pairing), workspace/, agents/ (auth profiles),
+      #   memory/ (conversation history), bindings/, identity/, plugin-state/.
+      # Skills y los .json/.md de config se reescriben cada boot por el
+      # entrypoint, asi que persistirlos es inocuo.
+      - agent01_state:/home/node/.openclaw
       - agent01_logs:/var/log/agente
     ports:
       - "${PORT_AGENT01:-0}:18789"
@@ -73,8 +77,7 @@ services:
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
     volumes:
-      - agent02_data:/home/node/.openclaw/workspace
-      - agent02_creds:/home/node/.openclaw/credentials
+      - agent02_state:/home/node/.openclaw
       - agent02_logs:/var/log/agente
     ports:
       - "${PORT_AGENT02:-0}:18789"
@@ -106,8 +109,7 @@ services:
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
     volumes:
-      - agent03_data:/home/node/.openclaw/workspace
-      - agent03_creds:/home/node/.openclaw/credentials
+      - agent03_state:/home/node/.openclaw
       - agent03_logs:/var/log/agente
     ports:
       - "${PORT_AGENT03:-0}:18789"
@@ -139,8 +141,7 @@ services:
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
     volumes:
-      - agent04_data:/home/node/.openclaw/workspace
-      - agent04_creds:/home/node/.openclaw/credentials
+      - agent04_state:/home/node/.openclaw
       - agent04_logs:/var/log/agente
     ports:
       - "${PORT_AGENT04:-0}:18789"
@@ -152,15 +153,11 @@ services:
       start_period: 30s
 
 volumes:
-  agent01_data:
-  agent01_creds:
+  agent01_state:
   agent01_logs:
-  agent02_data:
-  agent02_creds:
+  agent02_state:
   agent02_logs:
-  agent03_data:
-  agent03_creds:
+  agent03_state:
   agent03_logs:
-  agent04_data:
-  agent04_creds:
+  agent04_state:
   agent04_logs:

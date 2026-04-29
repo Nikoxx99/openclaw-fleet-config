@@ -58,9 +58,24 @@ ENV PATH="$VENV_DIR/bin:$PATH"
 # Entrypoint y healthcheck del fleet.
 COPY entrypoint.sh /usr/local/bin/fleet-entrypoint.sh
 COPY scripts/healthcheck.sh /usr/local/bin/fleet-healthcheck.sh
+# Pre-crear OPENCLAW_CONFIG_DIR con ownership node:node ANTES del USER node.
+# Critico para que cuando Coolify/Docker monte el named volume sobre
+# /home/node/.openclaw, el mountpoint herede los permisos correctos. Si el
+# directorio no existe en la imagen, Docker crea el mount con root:root y
+# el harness explota con EACCES al intentar escribir credentials/, agents/,
+# memory/, bindings/ (todos uid 1000 = node).
 RUN chmod +x /usr/local/bin/fleet-entrypoint.sh /usr/local/bin/fleet-healthcheck.sh && \
     install -d -m 0755 -o node -g node $FLEET_DIR $HOOKS_DIR && \
-    install -d -m 0700 -o node -g node /var/log/agente
+    install -d -m 0700 -o node -g node /var/log/agente && \
+    install -d -m 0755 -o node -g node $OPENCLAW_HOME/.openclaw && \
+    install -d -m 0700 -o node -g node \
+        $OPENCLAW_HOME/.openclaw/credentials \
+        $OPENCLAW_HOME/.openclaw/workspace \
+        $OPENCLAW_HOME/.openclaw/agents \
+        $OPENCLAW_HOME/.openclaw/memory \
+        $OPENCLAW_HOME/.openclaw/bindings \
+        $OPENCLAW_HOME/.openclaw/identity \
+        $OPENCLAW_HOME/.openclaw/plugin-state
 
 # Coolify hace healthcheck cada 30s. Override del HEALTHCHECK de la imagen base
 # para chequear el endpoint real del gateway (puerto 18789, /healthz).

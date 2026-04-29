@@ -125,7 +125,19 @@ def build_provider_outputs(
         # (caso minimax con baseUrl custom + api anthropic-messages).
         provider_config = cfg.get("config")
         if provider_config and isinstance(provider_config, dict):
-            models_providers[name] = {**provider_config, "apiKey": api_key}
+            entry_config: dict[str, Any] = {**provider_config, "apiKey": api_key}
+            # Si el provider usa la API anthropic-messages con baseUrl custom,
+            # el harness exige authHeader: true para mandar la key como
+            # `Authorization: Bearer ...` en lugar del header `x-api-key`
+            # (que es el default de Anthropic). Replica el comportamiento de
+            # extensions/minimax/onboard.ts en el repo openclaw.
+            if (
+                entry_config.get("api") == "anthropic-messages"
+                and entry_config.get("baseUrl")
+                and "authHeader" not in entry_config
+            ):
+                entry_config["authHeader"] = True
+            models_providers[name] = entry_config
 
     return plugins_entries, auth_profiles, models_providers
 
@@ -215,6 +227,39 @@ def to_openclaw_json(
         merged, env
     )
 
+    # Para cada modelRef que el agente usa primario (provider/modelId), si su
+    # provider tiene un display alias, materializarlo en
+    # `agents.defaults.models.<ref>.alias`. Replica lo que hace
+    # extensions/minimax/onboard.ts cuando aplica
+    # applyOnboardAuthAgentModelsAndProviders. Sin esto el TUI muestra el id
+    # crudo del modelo; con esto muestra "Minimax" / "Gemini" / etc.
+    PROVIDER_ALIASES: dict[str, str] = {
+        "minimax": "Minimax",
+        "openai": "OpenAI",
+        "google": "Gemini",
+    }
+    agents_default_models: dict[str, Any] = {}
+    for ref_source in (
+        rt.get("model", {}).get("primary"),
+        rt.get("image_input", {}).get("primary"),
+        rt.get("image_generation", {}).get("primary"),
+    ):
+        if not isinstance(ref_source, str) or "/" not in ref_source:
+            continue
+        provider_id = ref_source.split("/", 1)[0]
+        alias = PROVIDER_ALIASES.get(provider_id)
+        if alias:
+            agents_default_models[ref_source] = {"alias": alias}
+
+    agents_defaults: dict[str, Any] = {
+        "workspace": rt.get("workspace", "/home/node/.openclaw/workspace"),
+        "model": _model_block(rt.get("model", {})),
+        "imageModel": _image_block(rt.get("image_input", {})),
+        "imageGenerationModel": _image_block(rt.get("image_generation", {})),
+    }
+    if agents_default_models:
+        agents_defaults["models"] = agents_default_models
+
     out: dict[str, Any] = {
         "gateway": {
             "port": merged.get("gateway", {}).get("port", 18789),
@@ -222,12 +267,7 @@ def to_openclaw_json(
             "bind": merged.get("gateway", {}).get("bind", "loopback"),
         },
         "agents": {
-            "defaults": {
-                "workspace": rt.get("workspace", "/home/node/.openclaw/workspace"),
-                "model": _model_block(rt.get("model", {})),
-                "imageModel": _image_block(rt.get("image_input", {})),
-                "imageGenerationModel": _image_block(rt.get("image_generation", {})),
-            }
+            "defaults": agents_defaults,
         },
         "channels": {
             "telegram": _telegram_block(merged.get("channels", {}).get("telegram", {})),
