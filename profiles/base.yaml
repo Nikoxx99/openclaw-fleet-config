@@ -17,7 +17,9 @@ identity:
     - "Nunca enviar rutas de archivo al usuario; adjuntar el archivo"
 
 runtime:
-  workspace: /data/workspace
+  # Alineado con la imagen oficial openclaw: /home/node/.openclaw es el OPENCLAW_HOME
+  # canonico (user node, uid 1000). El volume de Coolify monta el workspace ahi.
+  workspace: /home/node/.openclaw/workspace
   model:
     primary: minimax/MiniMax-M2.7
     fallback: null
