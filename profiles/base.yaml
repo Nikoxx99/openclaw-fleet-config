@@ -16,6 +16,39 @@ identity:
     - "TTS solo si se pide explicito o el contexto lo amerita"
     - "Nunca enviar rutas de archivo al usuario; adjuntar el archivo"
 
+# Providers — metadata por provider. compile.py lee este bloque y, segun que
+# api_key_env esten seteadas en el environment del container, auto-genera:
+#   - plugins.entries.<name>.enabled = true (habilita el plugin)
+#   - auth.profiles.<auth_profile> (asigna mode api_key)
+#   - models.providers.<name> (si tiene `config` — caso minimax con baseUrl custom)
+#   - messages.tts.providers.<name>.apiKey (si el provider es el TTS provider)
+# Si la api_key_env no esta seteada, ese provider se ignora (skip silencioso).
+providers:
+  openai:
+    api_key_env: OPENAI_API_KEY
+    auth_profile: "openai:global"
+  gemini:
+    api_key_env: GEMINI_API_KEY
+    auth_profile: "gemini:global"
+  minimax:
+    api_key_env: MINIMAX_API_KEY
+    auth_profile: "minimax:global"
+    config:
+      api: anthropic-messages
+      baseUrl: https://api.minimax.io/anthropic
+      models:
+        - id: MiniMax-M2.7
+          name: MiniMax M2.7
+          contextWindow: 200000
+  firecrawl:
+    api_key_env: FIRECRAWL_API_KEY
+    plugin_only: true
+  elevenlabs:
+    api_key_env: ELEVENLABS_API_KEY
+    plugin_only: true
+  browser:
+    always_enabled: true
+
 runtime:
   # Alineado con la imagen oficial openclaw: /home/node/.openclaw es el OPENCLAW_HOME
   # canonico (user node, uid 1000). El volume de Coolify monta el workspace ahi.

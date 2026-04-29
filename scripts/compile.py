@@ -74,12 +74,78 @@ def load_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
-def to_openclaw_json(merged: dict[str, Any]) -> dict[str, Any]:
+def build_provider_outputs(
+    merged: dict[str, Any], env: dict[str, str]
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Genera los 3 bloques que OpenClaw necesita por provider:
+       - plugins.entries.<name>.enabled = true
+       - auth.profiles.<auth_profile> (LLM providers solo)
+       - models.providers.<name> (providers con config custom: baseUrl, etc.)
+
+    Skip silencioso si api_key_env no esta seteada.
+    """
+    providers_cfg = merged.get("providers", {}) or {}
+    plugins_entries: dict[str, Any] = {}
+    auth_profiles: dict[str, Any] = {}
+    models_providers: dict[str, Any] = {}
+
+    for name, cfg in providers_cfg.items():
+        if not isinstance(cfg, dict):
+            continue
+
+        # Plugins always-on (sin api key, ej. browser).
+        if cfg.get("always_enabled"):
+            plugins_entries[name] = {"enabled": True}
+            continue
+
+        env_var = cfg.get("api_key_env")
+        if not env_var:
+            continue
+        api_key = env.get(env_var, "")
+        if not api_key:
+            continue  # skip silencioso
+
+        entry: dict[str, Any] = {"enabled": True}
+
+        # Caso especial firecrawl: la API key va en plugin.config.webSearch.apiKey.
+        if name == "firecrawl":
+            entry["config"] = {"webSearch": {"apiKey": api_key}}
+
+        plugins_entries[name] = entry
+
+        # Auth profile (solo LLM providers).
+        auth_profile = cfg.get("auth_profile")
+        if auth_profile:
+            auth_profiles[auth_profile] = {
+                "provider": name,
+                "mode": "api_key",
+            }
+
+        # models.providers entry — solo si el provider declaro `config`
+        # (caso minimax con baseUrl custom + api anthropic-messages).
+        provider_config = cfg.get("config")
+        if provider_config and isinstance(provider_config, dict):
+            models_providers[name] = {**provider_config, "apiKey": api_key}
+
+    return plugins_entries, auth_profiles, models_providers
+
+
+def to_openclaw_json(
+    merged: dict[str, Any], env: dict[str, str] | None = None
+) -> dict[str, Any]:
     """Mapea el schema YAML al shape que el harness OpenClaw espera.
     El JSON resultante imita la estructura de un openclaw.json valido.
     """
+    if env is None:
+        env = dict(os.environ)
     rt = merged.get("runtime", {})
     tts = rt.get("tts", {})
+    providers_cfg = merged.get("providers", {}) or {}
+
+    plugins_entries, auth_profiles, models_providers = build_provider_outputs(
+        merged, env
+    )
+
     out: dict[str, Any] = {
         "gateway": {
             "port": merged.get("gateway", {}).get("port", 18789),
@@ -88,7 +154,7 @@ def to_openclaw_json(merged: dict[str, Any]) -> dict[str, Any]:
         },
         "agents": {
             "defaults": {
-                "workspace": rt.get("workspace", "/data/workspace"),
+                "workspace": rt.get("workspace", "/home/node/.openclaw/workspace"),
                 "model": rt.get("model", {}),
                 "imageModel": rt.get("image_input", {}),
                 "imageGenerationModel": rt.get("image_generation", {}),
@@ -104,18 +170,30 @@ def to_openclaw_json(merged: dict[str, Any]) -> dict[str, Any]:
         },
         "hooks": merged.get("hooks", {"internal": {"enabled": True}}),
     }
+
+    if plugins_entries:
+        out["plugins"] = {"entries": plugins_entries}
+    if auth_profiles:
+        out["auth"] = {"profiles": auth_profiles}
+    if models_providers:
+        out["models"] = {"providers": models_providers, "mode": "merge"}
+
     if tts:
+        tts_provider_name = tts.get("provider")
+        tts_provider_meta = providers_cfg.get(tts_provider_name, {}) or {}
+        tts_api_key = env.get(tts_provider_meta.get("api_key_env", ""), "")
+        provider_block: dict[str, Any] = {
+            "model": tts.get("model"),
+            "voiceId": tts.get("voice_id"),
+        }
+        if tts_api_key:
+            provider_block["apiKey"] = tts_api_key
         out["messages"] = {
             "tts": {
                 "enabled": tts.get("enabled", False),
                 "mode": tts.get("mode", "final"),
-                "provider": tts.get("provider"),
-                "providers": {
-                    tts.get("provider"): {
-                        "model": tts.get("model"),
-                        "voiceId": tts.get("voice_id"),
-                    }
-                },
+                "provider": tts_provider_name,
+                "providers": {tts_provider_name: provider_block},
             }
         }
     return out
