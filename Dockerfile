@@ -17,8 +17,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
     VENV_DIR=/opt/venv \
     FLEET_DIR=/opt/fleet \
     HOOKS_DIR=/opt/hooks \
-    OPENCLAW_HOME=/home/node/.openclaw \
+    OPENCLAW_HOME=/home/node \
+    OPENCLAW_CONFIG_DIR=/home/node/.openclaw \
     OPENCLAW_BUNDLED_SKILLS_DIR=/home/node/.openclaw/skills
+
+# Nota: OPENCLAW_HOME es el HOME del usuario (parent), OpenClaw concatena
+# `.openclaw` por su cuenta. Si lo seteamos a /home/node/.openclaw el harness
+# lo dobla a /home/node/.openclaw/.openclaw/. OPENCLAW_CONFIG_DIR es nuestro
+# alias interno para el dir donde compile.py escribe el openclaw.json final.
 
 # Sistema: ffmpeg (audio/concat), tesseract+spa+eng (OCR), poppler (pdftoppm),
 # imagemagick (identify para sensitive-image-gate), python+venv, jq.

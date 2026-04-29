@@ -22,7 +22,8 @@ AGENT_ID="${1:-${AGENT_ID:-}}"
 : "${FLEET_REPO_URL:=https://github.com/Nikoxx99/openclaw-fleet-config.git}"
 : "${FLEET_DIR:=/opt/fleet}"
 : "${HOOKS_DIR:=/opt/hooks}"
-: "${OPENCLAW_HOME:=/home/node/.openclaw}"
+: "${OPENCLAW_HOME:=/home/node}"
+: "${OPENCLAW_CONFIG_DIR:=$OPENCLAW_HOME/.openclaw}"
 
 log() { printf '{"ts":"%s","level":"INFO","event":"entrypoint","msg":"%s"}\n' "$(date -u +%FT%TZ)" "$1"; }
 err() { printf '{"ts":"%s","level":"ERROR","event":"entrypoint","msg":"%s"}\n' "$(date -u +%FT%TZ)" "$1" >&2; }
@@ -57,19 +58,19 @@ if [ ! -f "$AGENT_YAML" ]; then
 fi
 
 # 3) Compilar YAML → openclaw.json + fleet-policies.json + prompt.md
-mkdir -p "$OPENCLAW_HOME"
-log "compiling agent ${AGENT_ID}"
+mkdir -p "$OPENCLAW_CONFIG_DIR"
+log "compiling agent ${AGENT_ID} → $OPENCLAW_CONFIG_DIR"
 python3 "$FLEET_DIR/scripts/compile.py" \
   --base "$FLEET_DIR/profiles/base.yaml" \
   --agent "$AGENT_YAML" \
-  --out-dir "$OPENCLAW_HOME"
+  --out-dir "$OPENCLAW_CONFIG_DIR"
 
 # 4) Copiar skills privadas al dir bundled que OpenClaw escanea.
 #    Importante: cp -r y NO symlink. OpenClaw rechaza symlinks que apunten
 #    fuera del root bundled (security check bundled-symlink-escape en
 #    src/agents/skills/workspace.ts). Las paths bajo /opt/fleet quedan
 #    fuera del root, asi que symlinks ahi son ignorados silenciosamente.
-SKILLS_DEST="${OPENCLAW_BUNDLED_SKILLS_DIR:-$OPENCLAW_HOME/skills}"
+SKILLS_DEST="${OPENCLAW_BUNDLED_SKILLS_DIR:-$OPENCLAW_CONFIG_DIR/skills}"
 mkdir -p "$SKILLS_DEST"
 mounted=0
 for skill_dir in "$FLEET_DIR/skills/"*/; do
