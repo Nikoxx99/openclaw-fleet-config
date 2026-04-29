@@ -56,8 +56,8 @@ En Coolify:
    — el FROM extiende `ghcr.io/openclaw/openclaw:latest` que ya existe).
 2. Env vars del recurso (per-agent):
    - `AGENT_ID=alice`
-   - `AGENT_ID_UPPER=ALICE`
    - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+   (El upper-case se computa solo en `entrypoint.sh`; no setees `AGENT_ID_UPPER`.)
 3. Env vars compartidas (proyecto): `OPENAI_API_KEY`, `GEMINI_API_KEY`,
    `FIRECRAWL_API_KEY`, `MINIMAX_API_KEY`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`,
    `R2_SECRET_ACCESS_KEY`.
@@ -82,8 +82,8 @@ hot-reload sin downtime via SIGHUP — pendiente de implementar en el harness.
 | `FIRECRAWL_API_KEY` | proyecto | Coolify project env |
 | `MINIMAX_API_KEY` | proyecto | Coolify project env |
 | `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | proyecto | Coolify project env |
-| `TELEGRAM_BOT_TOKEN_<ID>` | per-agent | Coolify resource env |
-| `TELEGRAM_CHAT_ID_<ID>` | per-agent | Coolify resource env |
+| `TELEGRAM_BOT_TOKEN` | per-agent | Coolify resource env (entrypoint lo renombra a `TELEGRAM_BOT_TOKEN_<UPPER(AGENT_ID)>`) |
+| `TELEGRAM_CHAT_ID` | per-agent | Coolify resource env (idem) |
 
 **Nunca** commitees valores reales. Solo `${VAR_NAME}` en los YAML.
 

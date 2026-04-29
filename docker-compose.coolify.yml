@@ -1,21 +1,25 @@
 # docker-compose.coolify.yml
 #
-# Template para Coolify. Una instancia = un agente. Para N agentes, crea N
-# Resources en Coolify, todos apuntando a este compose con AGENT_ID distinto.
+# Template para Coolify. Una instancia = un agente (un Resource en Coolify).
+# Para N agentes, crea N Resources distintos, todos apuntando a este compose
+# pero con AGENT_ID, TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID propios.
 #
-# Build se hace en Coolify desde este repo (no GHCR propio). El FROM extiende
-# `ghcr.io/openclaw/openclaw:latest` que ya existe en el registry — la layer
-# se cachea, builds incrementales son rapidos (~30s).
+# IMPORTANTE — disenio:
+#   * Coolify aisla volumes y containers por Resource automaticamente. NO uses
+#     interpolacion `${AGENT_ID}` en nombres de volume / container_name —
+#     Coolify lo rechaza durante validacion ("forbidden character").
+#   * Coolify NO interpola en YAML keys (solo en valores). Por eso pasamos
+#     TELEGRAM_BOT_TOKEN con nombre fijo y el entrypoint.sh lo re-exporta
+#     como TELEGRAM_BOT_TOKEN_<UPPER(AGENT_ID)> antes del compile.
 
 services:
   agent:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: openclaw-${AGENT_ID}
     restart: unless-stopped
     environment:
-      # Identidad del agente (REQUERIDO).
+      # Identidad del agente (REQUERIDO en Resource env vars).
       AGENT_ID: ${AGENT_ID}
       FLEET_REF: ${FLEET_REF:-main}
       FLEET_REPO_URL: ${FLEET_REPO_URL:-https://github.com/Nikoxx99/openclaw-fleet-config.git}
@@ -23,7 +27,7 @@ services:
       # Forzar bind LAN para que Coolify enrute el gateway desde el host.
       OPENCLAW_GATEWAY_BIND: lan
 
-      # Compartidos por todos los agentes (proyecto-level en Coolify).
+      # Compartidos (project-level env vars en Coolify).
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       GEMINI_API_KEY: ${GEMINI_API_KEY}
       FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
@@ -32,19 +36,17 @@ services:
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
 
-      # Per-agent (resource-level). Convencion: TELEGRAM_BOT_TOKEN_<UPPER>.
-      # El YAML referencia ${TELEGRAM_BOT_TOKEN_ALICE}, etc.
-      TELEGRAM_BOT_TOKEN_${AGENT_ID_UPPER}: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_CHAT_ID_${AGENT_ID_UPPER}: ${TELEGRAM_CHAT_ID}
+      # Per-agent (resource-level env vars en Coolify). Nombres FIJOS aqui;
+      # el entrypoint los re-exporta como ${TELEGRAM_BOT_TOKEN_AGENT01} etc.
+      # antes de invocar compile.py.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
 
     volumes:
-      # Workspace persistente.
-      - openclaw_data_${AGENT_ID}:/home/node/.openclaw/workspace
-      # Logs persistentes (crash-recovery los lee al boot).
-      - openclaw_logs_${AGENT_ID}:/var/log/agente
+      - openclaw_data:/home/node/.openclaw/workspace
+      - openclaw_logs:/var/log/agente
 
     ports:
-      # 18789 es el puerto del gateway OpenClaw (no 8080).
       - "${HOST_PORT:-0}:18789"
 
     healthcheck:
@@ -54,10 +56,6 @@ services:
       retries: 3
       start_period: 30s
 
-    labels:
-      coolify.managed: "true"
-      coolify.name: "openclaw-${AGENT_ID}"
-
 volumes:
-  openclaw_data_${AGENT_ID}:
-  openclaw_logs_${AGENT_ID}:
+  openclaw_data:
+  openclaw_logs:

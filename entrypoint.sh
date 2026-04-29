@@ -10,7 +10,7 @@
 
 set -euo pipefail
 
-: "${AGENT_ID:?AGENT_ID is required (e.g. 'alice')}"
+: "${AGENT_ID:?AGENT_ID is required (e.g. 'agent01')}"
 : "${FLEET_REF:=main}"
 : "${FLEET_REPO_URL:=https://github.com/Nikoxx99/openclaw-fleet-config.git}"
 : "${FLEET_DIR:=/opt/fleet}"
@@ -19,6 +19,18 @@ set -euo pipefail
 
 log() { printf '{"ts":"%s","level":"INFO","event":"entrypoint","msg":"%s"}\n' "$(date -u +%FT%TZ)" "$1"; }
 err() { printf '{"ts":"%s","level":"ERROR","event":"entrypoint","msg":"%s"}\n' "$(date -u +%FT%TZ)" "$1" >&2; }
+
+# 0) Re-exportar env vars per-agent con el nombre que el YAML espera.
+#    Coolify pasa TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID con nombres fijos
+#    (no puede interpolar en YAML keys). El YAML del agente referencia
+#    ${TELEGRAM_BOT_TOKEN_AGENT01} — aqui lo creamos.
+upper=$(printf '%s' "$AGENT_ID" | tr '[:lower:]-' '[:upper:]_')
+if [ -n "${TELEGRAM_BOT_TOKEN:-}" ]; then
+  export "TELEGRAM_BOT_TOKEN_${upper}=${TELEGRAM_BOT_TOKEN}"
+fi
+if [ -n "${TELEGRAM_CHAT_ID:-}" ]; then
+  export "TELEGRAM_CHAT_ID_${upper}=${TELEGRAM_CHAT_ID}"
+fi
 
 # 1) Clonar / actualizar fleet config.
 if [ ! -d "$FLEET_DIR/.git" ]; then
